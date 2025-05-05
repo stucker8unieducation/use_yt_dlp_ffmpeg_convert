@@ -19,6 +19,7 @@ import ffmpeg
 import signal
 import sys
 from pathlib import Path
+import os
 
 # グローバル変数で現在処理中のファイルを追跡
 current_output_file = None
@@ -63,9 +64,10 @@ def convert_to_mov(input_path, output_dir=None, preset='veryslow', audio_codec='
     動画ファイルをMOV形式に変換する関数
     
     変換時は以下の優先順位で処理を行います：
-    1. HEVC (H.265) VideoToolboxでGPUエンコード
-    2. 失敗時はlibx265でCPUエンコード
-    3. 入力がProResの場合：コーデックを直接コピー
+    1. NVIDIA GPUが利用可能な場合：NVENCでGPUエンコード
+    2. Apple Silicon GPUが利用可能な場合：VideoToolboxでGPUエンコード
+    3. 失敗時はlibx265でCPUエンコード
+    4. 入力がProResの場合：コーデックを直接コピー
     
     品質維持の方針：
     - HDR情報やカラースペース情報を保持
@@ -139,8 +141,6 @@ def convert_to_mov(input_path, output_dir=None, preset='veryslow', audio_codec='
                                  audio_bitrate='320k' if audio_codec != 'copy' else None,
                                  format='mov')
         else:
-            print("VideoToolbox (GPU)を使用してHEVC (H.265)で変換を試みます")
-            
             # ビットレートの計算
             base_bitrate = 100 if height >= 2160 else 50 if height >= 1440 else 20 if height >= 1080 else 10
             bitrate = base_bitrate * (min(fps, 60) / 30)
@@ -151,21 +151,38 @@ def convert_to_mov(input_path, output_dir=None, preset='veryslow', audio_codec='
             print(f"ビットレート: {bitrate}M (最大: {maxrate}M)")
             print(f"音声コーデック: {audio_codec}")
             
-            # 出力設定
-            output_args = {
-                'vcodec': 'hevc_videotoolbox',  # HEVCエンコーダー
-                'video_bitrate': f"{bitrate}M",
-                'maxrate': f"{maxrate}M",
-                'bufsize': f"{bufsize}M",
-                'profile:v': 'main',
-                'pix_fmt': 'nv12',
-                'acodec': audio_codec,
-                'ar': '48000',                  # サンプリングレート
-                'audio_bitrate': '320k' if audio_codec != 'copy' else None,
-                'movflags': '+faststart',
-                'tag:v': 'hvc1',                # HEVCタグ
-                'format': 'mov'
-            }
+            # OSに応じてGPUエンコードを試行
+            if os.name == 'nt':  # Windows環境
+                print("NVIDIA NVENC (GPU)を使用して変換を試みます")
+                output_args = {
+                    'vcodec': 'h264_nvenc',      # NVIDIA GPUエンコーダー
+                    'video_bitrate': f"{bitrate}M",
+                    'maxrate': f"{maxrate}M",
+                    'bufsize': f"{bufsize}M",
+                    'profile:v': 'high',
+                    'pix_fmt': 'nv12',
+                    'acodec': audio_codec,
+                    'ar': '48000',
+                    'audio_bitrate': '320k' if audio_codec != 'copy' else None,
+                    'movflags': '+faststart',
+                    'format': 'mov'
+                }
+            else:  # macOS環境
+                print("VideoToolbox (GPU)を使用してHEVC (H.265)で変換を試みます")
+                output_args = {
+                    'vcodec': 'hevc_videotoolbox',
+                    'video_bitrate': f"{bitrate}M",
+                    'maxrate': f"{maxrate}M",
+                    'bufsize': f"{bufsize}M",
+                    'profile:v': 'main',
+                    'pix_fmt': 'nv12',
+                    'acodec': audio_codec,
+                    'ar': '48000',
+                    'audio_bitrate': '320k' if audio_codec != 'copy' else None,
+                    'movflags': '+faststart',
+                    'tag:v': 'hvc1',
+                    'format': 'mov'
+                }
             
             # None値を持つキーを削除
             output_args = {k: v for k, v in output_args.items() if v is not None}
@@ -180,65 +197,60 @@ def convert_to_mov(input_path, output_dir=None, preset='veryslow', audio_codec='
             print(f"完了: {output_path}")
             return str(output_path)
         except ffmpeg.Error as e:
-            # VideoToolboxのエンコードに失敗した場合は、
-            # エラーログを見て対応をする
+            # GPUエンコードの失敗時はCPUエンコードにフォールバック
             err_msg = e.stderr.decode()
-            print(f"VideoToolboxエンコード失敗:\n{err_msg}")
+            print(f"GPUエンコード失敗:\n{err_msg}")
             
-            if "Error: cannot create compression session: -12903" in err_msg or \
-               "Error while opening encoder" in err_msg or \
-               "hardware encoder may be busy, or not supported" in err_msg:
-                print("VideoToolboxが失敗したため、libx265で再試行します。")
-                
-                # VideoToolboxが失敗した場合のlibx265設定
-                output_args = {
-                    'vcodec': 'libx265',           # H.265 CPUエンコーダー
-                    'crf': 23,                     # HEVC用の品質基準値
-                    'preset': preset,              # エンコード速度と品質のバランス
-                    'profile:v': 'main10',         # HEVC 10bitプロファイル
-                    'pix_fmt': 'yuv420p10le' if is_hdr else 'yuv420p',  # HDR対応10bit
-                    'x265-params': f"aq-mode=3:no-fast-pskip=1:deblock=-1,-1",  # 高品質設定
-                    'acodec': audio_codec,         # 音声コーデック
-                    'ar': '48000',                 # サンプリングレート
-                    'audio_bitrate': '320k' if audio_codec != 'copy' else None,  # 音声ビットレート
-                    'movflags': '+faststart',      # Web再生用の最適化
-                    'tag:v': 'hvc1',               # HEVCタグ
-                    'format': 'mov',               # 出力フォーマット
-                    'threads': 'auto'              # 自動スレッド数設定
-                }
-                
-                # HDR/カラースペース情報の保持
-                if is_hdr and color_space and color_transfer and color_primaries:
-                    # x265-paramsにHDR設定を追加
-                    x264_params = [
-                        "aq-mode=3",
-                        "no-fast-pskip=1",
-                        "deblock=-1,-1",
-                        f"colorprim={color_primaries}",
-                        f"transfer={color_transfer}",
-                        f"colormatrix={color_space}"
-                    ]
-                    output_args['x265-params'] = ":".join(x264_params)
-                
-                # None値を持つキーを削除
-                output_args = {k: v for k, v in output_args.items() if v is not None}
-                
-                stream = ffmpeg.output(stream, str(output_path), **output_args)
-                
-                try:
-                    print(f"\nlibx265による最高品質変換開始: {input_path.name} → {output_path.name}")
-                    process = ffmpeg.run(stream, capture_stdout=True, capture_stderr=True)
-                    print(f"完了: {output_path}")
-                    return str(output_path)
-                except ffmpeg.Error as e:
-                    print(f"libx265エンコード失敗: {e.stderr.decode()}")
-                    print("\nFFmpegコマンド:")
-                    print(' '.join(ffmpeg.compile(stream)))
-                    raise
+            print("CPUエンコード（libx265）で再試行します。")
+            
+            # CPUエンコード設定
+            output_args = {
+                'vcodec': 'libx265',
+                'crf': 23,
+                'preset': preset,
+                'profile:v': 'main10',
+                'pix_fmt': 'yuv420p10le' if is_hdr else 'yuv420p',
+                'x265-params': f"aq-mode=3:no-fast-pskip=1:deblock=-1,-1",
+                'acodec': audio_codec,
+                'ar': '48000',
+                'audio_bitrate': '320k' if audio_codec != 'copy' else None,
+                'movflags': '+faststart',
+                'tag:v': 'hvc1',
+                'format': 'mov',
+                'threads': 'auto'
+            }
+            
+            # HDR/カラースペース情報の保持
+            if is_hdr and color_space and color_transfer and color_primaries:
+                x264_params = [
+                    "aq-mode=3",
+                    "no-fast-pskip=1",
+                    "deblock=-1,-1",
+                    f"colorprim={color_primaries}",
+                    f"transfer={color_transfer}",
+                    f"colormatrix={color_space}"
+                ]
+                output_args['x265-params'] = ":".join(x264_params)
+            
+            # None値を持つキーを削除
+            output_args = {k: v for k, v in output_args.items() if v is not None}
+            
+            stream = ffmpeg.output(stream, str(output_path), **output_args)
+            
+            try:
+                print(f"\nlibx265による最高品質変換開始: {input_path.name} → {output_path.name}")
+                process = ffmpeg.run(stream, capture_stdout=True, capture_stderr=True)
+                print(f"完了: {output_path}")
+                return str(output_path)
+            except ffmpeg.Error as e:
+                print(f"libx265エンコード失敗: {e.stderr.decode()}")
+                print("\nFFmpegコマンド:")
+                print(' '.join(ffmpeg.compile(stream)))
+                raise
             
             print("\nFFmpegコマンド:")
             print(' '.join(ffmpeg.compile(stream)))
-            raise  # 処理できないffmpeg.Error を再送出
+            raise
         
     except Exception as e:
         cleanup_temp_file()

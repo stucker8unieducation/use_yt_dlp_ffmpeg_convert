@@ -111,7 +111,7 @@ def get_video_quality_settings(format_info):
 
 def check_gpu_support():
     """
-    Apple Silicon GPUのサポート状況を確認
+    GPUのサポート状況を確認
     
     Returns:
         bool: GPUエンコードが利用可能な場合はTrue
@@ -134,15 +134,23 @@ def check_gpu_support():
             text=True
         )
         
-        # VideoToolboxの利用可否をチェック
-        has_videotoolbox = 'videotoolbox' in hwaccels_result.stdout
-        has_h264_videotoolbox = 'h264_videotoolbox' in encoders_result.stdout
-        
-        if has_videotoolbox and has_h264_videotoolbox:
-            print("\nGPUエンコード機能:")
-            print(f"- VideoToolbox: {'利用可能' if has_videotoolbox else '利用不可'}")
-            print(f"- H.264 VideoToolbox: {'利用可能' if has_h264_videotoolbox else '利用不可'}")
-            return True
+        # OSに応じてGPUサポートをチェック
+        if os.name == 'nt':  # Windows環境
+            has_nvenc = 'h264_nvenc' in encoders_result.stdout
+            has_cuda = 'cuda' in hwaccels_result.stdout
+            if has_nvenc and has_cuda:
+                print("\nGPUエンコード機能:")
+                print(f"- NVIDIA NVENC: {'利用可能' if has_nvenc else '利用不可'}")
+                print(f"- CUDA: {'利用可能' if has_cuda else '利用不可'}")
+                return True
+        else:  # macOS環境
+            has_videotoolbox = 'videotoolbox' in hwaccels_result.stdout
+            has_h264_videotoolbox = 'h264_videotoolbox' in encoders_result.stdout
+            if has_videotoolbox and has_h264_videotoolbox:
+                print("\nGPUエンコード機能:")
+                print(f"- VideoToolbox: {'利用可能' if has_videotoolbox else '利用不可'}")
+                print(f"- H.264 VideoToolbox: {'利用可能' if has_h264_videotoolbox else '利用不可'}")
+                return True
         return False
     except:
         return False
