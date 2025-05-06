@@ -155,7 +155,7 @@ def check_gpu_support():
     except:
         return False
 
-def download_video(url, output_path='downloads', download_type='both'):
+def download_video(url, output_path='downloads', download_type='both', video_format='mp4'):
     """
     YouTubeから動画や音声をダウンロードする関数
     
@@ -163,6 +163,7 @@ def download_video(url, output_path='downloads', download_type='both'):
         url (str): YouTubeのURL
         output_path (str): 保存先ディレクトリ
         download_type (str): ダウンロードの種類（'video', 'audio', 'both'）
+        video_format (str): 動画フォーマット（'mp4', 'webm', 'mkv', 'mov'）
         
     Returns:
         bool: 成功した場合はTrue、失敗した場合はFalse
@@ -170,15 +171,60 @@ def download_video(url, output_path='downloads', download_type='both'):
     # FFmpegの存在確認
     ffmpeg_path = get_ffmpeg_path()
     if not ffmpeg_path:
-        print("エラー: FFmpegが見つかりません。Homebrewでインストールしてください:")
-        print("brew install ffmpeg")
+        print("エラー: FFmpegが見つかりません。")
         return False
+    
+    # フォーマット設定の定義
+    format_settings = {
+        'mp4': {
+            'format': 'bestvideo[ext=mp4][dynamic_range=HDR]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'merge_output_format': 'mp4',
+            'postprocessor_args': [
+                '-c:v', 'copy',
+                '-c:a', 'aac',
+                '-movflags', '+use_metadata_tags',
+                '-map_metadata', '0',
+            ]
+        },
+        'webm': {
+            'format': 'bestvideo[ext=webm][dynamic_range=HDR]+bestaudio[ext=webm]/bestvideo[ext=webm]+bestaudio[ext=webm]/best[ext=webm]/best',
+            'merge_output_format': 'webm',
+            'postprocessor_args': [
+                '-c:v', 'copy',
+                '-c:a', 'libvorbis',
+            ]
+        },
+        'mkv': {
+            'format': 'bestvideo[dynamic_range=HDR]+bestaudio/bestvideo+bestaudio/best',
+            'merge_output_format': 'mkv',
+            'postprocessor_args': [
+                '-c:v', 'copy',
+                '-c:a', 'copy',
+            ]
+        },
+        'mov': {
+            'format': 'bestvideo[ext=mp4][dynamic_range=HDR]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'merge_output_format': 'mov',
+            'postprocessor_args': [
+                '-c:v', 'copy',
+                '-c:a', 'aac',
+                '-movflags', '+use_metadata_tags',
+                '-map_metadata', '0',
+            ]
+        }
+    }
     
     # yt-dlpの基本設定
     ydl_opts = {
-        'outtmpl': f'{output_path}/%(title)s.%(ext)s',  # 出力ファイル名のテンプレート
-        'prefer_ffmpeg': True,        # FFmpegを使用
-        'ffmpeg_location': ffmpeg_path,  # FFmpegのパス
+        'outtmpl': f'{output_path}/%(title).100s.%(ext)s',
+        'prefer_ffmpeg': True,
+        'ffmpeg_location': ffmpeg_path,
+        'restrictfilenames': True,
+        'verbose': True,
+        'postprocessor_args': [
+            '-loglevel', 'debug',
+            '-stats',
+        ],
     }
     
     try:
@@ -187,34 +233,52 @@ def download_video(url, output_path='downloads', download_type='both'):
             info = ydl.extract_info(url, download=False)
             
         if download_type == 'audio':
-            # 音声のみのダウンロード設定
             print("\n音声をダウンロードします...")
             ydl_opts.update({
-                'format': 'bestaudio/best',  # 最高品質の音声
+                'format': 'bestaudio/best',
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'm4a',     # M4A形式
-                    'preferredquality': '0',      # 最高品質
-                }]
+                    'preferredcodec': 'm4a',
+                    'preferredquality': '0',
+                }],
+                'postprocessor_args': [
+                    '-c:a', 'copy',  # 元の音声コーデックをそのまま使用
+                ]
             })
         
         elif download_type in ['video', 'both']:
-            # 動画（または動画+音声）のダウンロード設定
-            print("\n動画をダウンロードします...")
+            print(f"\n動画をダウンロードします（{video_format.upper()}形式）...")
+            format_config = format_settings.get(video_format, format_settings['mp4'])
             ydl_opts.update({
-                'format': 'bv*+ba/b',  # 最高品質の動画+音声を単一コンテナで
-                'merge_output_format': 'webm'  # WebM形式で出力
+                'format': format_config['format'],
+                'merge_output_format': format_config['merge_output_format'],
+                'postprocessors': [{
+                    'key': 'FFmpegVideoConvertor',
+                    'preferedformat': format_config['merge_output_format'],
+                }],
+                'postprocessor_args': format_config['postprocessor_args']
             })
         
         # ダウンロードの実行
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            print(f"\nダウンロードが完了しました: {info['title']}")
-            return True
+            try:
+                info = ydl.extract_info(url, download=True)
+                print(f"\nダウンロードが完了しました: {info['title']}")
+                return True
+            except yt_dlp.DownloadError as e:
+                print(f"\nダウンロード中にエラーが発生しました: {str(e)}")
+                print(f"エラーの詳細: {type(e).__name__}")
+                if hasattr(e, 'exc_info'):
+                    print(f"例外情報: {e.exc_info}")
+                return False
             
     except Exception as e:
-        print(f"\nダウンロード中にエラーが発生しました: {str(e)}")
+        print(f"\n予期せぬエラーが発生しました: {str(e)}")
         print(f"エラーの詳細: {type(e).__name__}")
+        if hasattr(e, '__traceback__'):
+            import traceback
+            print("トレースバック:")
+            traceback.print_tb(e.__traceback__)
         return False
 
 # メインプログラム
@@ -227,7 +291,7 @@ if __name__ == "__main__":
     if ffmpeg_path:
         print(f"FFmpegが見つかりました: {ffmpeg_path}")
         if check_gpu_support():
-            print("Apple Silicon GPUエンコードを使用します（VideoToolbox）")
+            print("GPUエンコードを使用します")
         else:
             print("警告: GPUエンコードが利用できません。CPUエンコードを使用します。")
     else:
@@ -243,17 +307,33 @@ if __name__ == "__main__":
         
         # ダウンロード種類の選択
         print("\n1. 音声のみダウンロード（最高品質m4a）")
-        print("2. 動画のみダウンロード（Apple GPU使用）")
-        print("3. 両方ダウンロード（Apple GPU使用）")
+        print("2. 動画のみダウンロード")
+        print("3. 両方ダウンロード")
         choice = input("選択してください (1/2/3): ")
+        
+        if choice in ['2', '3']:
+            print("\n動画フォーマットを選択してください:")
+            print("1. MP4 (推奨、最も互換性が高い)")
+            print("2. WebM")
+            print("3. MKV (最高品質、柔軟性が高い)")
+            print("4. MOV (Appleデバイス向け)")
+            format_choice = input("選択してください (1/2/3/4): ")
+            
+            format_map = {
+                '1': 'mp4',
+                '2': 'webm',
+                '3': 'mkv',
+                '4': 'mov'
+            }
+            video_format = format_map.get(format_choice, 'mp4')
         
         # 選択に応じてダウンロード実行
         if choice == '1':
             download_video(url, AUDIO_FILE_PATH, 'audio')
         elif choice == '2':
-            download_video(url, VIDEO_FILE_PATH, 'video')
+            download_video(url, VIDEO_FILE_PATH, 'video', video_format)
         elif choice == '3':
-            download_video(url, VIDEO_FILE_PATH, 'both')
+            download_video(url, VIDEO_FILE_PATH, 'both', video_format)
         else:
             print("無効な選択です。")
         

@@ -1,0 +1,13 @@
+# コアライブラリ
+yt-dlp>=2024.3.10  # YouTubeダウンロード用
+ffmpeg-python>=0.2.0  # FFmpeg操作用
+
+# 依存ライブラリ
+requests>=2.31.0  # HTTPリクエスト用
+urllib3>=2.2.0  # URL操作用
+certifi>=2024.2.2  # SSL証明書用
+charset-normalizer>=3.3.2  # 文字エンコーディング用
+idna>=3.6  # 国際化ドメイン名用
+
+# オプションライブラリ（GPUサポート用）
+nvidia-ml-py3>=7.352.0  # NVIDIA GPUモニタリング用（Windows環境でNVIDIA GPUを使用する場合） 
