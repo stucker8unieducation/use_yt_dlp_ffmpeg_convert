@@ -249,7 +249,7 @@ def download_video(url, output_path='downloads', download_type='both', video_for
                     '-loglevel', 'error'  # エラーログのみ表示
                 ],
                 'keepvideo': False,  # 元の動画ファイルを削除
-                'writethumbnail': True,  # サムネイルをダウンロード
+                'writethumbnail': False,  # サムネイルをダウンロード
                 'verbose': False,  # 詳細なログを無効化
                 'embed_metadata': True,  # メタデータを埋め込む
                 'embed_thumbnail': True,  # サムネイルを埋め込む
