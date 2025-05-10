@@ -216,10 +216,10 @@ def download_video(url, output_path='downloads', download_type='both', video_for
     
     # yt-dlpの基本設定
     ydl_opts = {
-        'outtmpl': f'{output_path}/%(title).100s.%(ext)s',
+        'outtmpl': f'{output_path}/%(title)s.%(ext)s',  # タイトルをファイル名として使用
         'prefer_ffmpeg': True,
         'ffmpeg_location': ffmpeg_path,
-        'restrictfilenames': True,
+        'restrictfilenames': False,  # ファイル名の制限を解除
         'verbose': True,
         'postprocessor_args': [
             '-loglevel', 'debug',
@@ -235,15 +235,25 @@ def download_video(url, output_path='downloads', download_type='both', video_for
         if download_type == 'audio':
             print("\n音声をダウンロードします...")
             ydl_opts.update({
-                'format': 'bestaudio/best',
+                'format': 'bestaudio/best',  # 最高品質の音声を選択
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'm4a',
-                    'preferredquality': '0',
+                    'preferredcodec': 'm4a',  # m4a形式で出力
+                    'preferredquality': '0',  # 最高品質
                 }],
                 'postprocessor_args': [
-                    '-c:a', 'copy',  # 元の音声コーデックをそのまま使用
-                ]
+                    '-c:a', 'aac',  # AACコーデックを使用
+                    '-b:a', '0',    # 元のビットレートを保持
+                    '-vn',          # ビデオストリームを無効化
+                    '-y',           # 既存ファイルを上書き
+                    '-loglevel', 'error'  # エラーログのみ表示
+                ],
+                'keepvideo': False,  # 元の動画ファイルを削除
+                'writethumbnail': True,  # サムネイルをダウンロード
+                'verbose': False,  # 詳細なログを無効化
+                'embed_metadata': True,  # メタデータを埋め込む
+                'embed_thumbnail': True,  # サムネイルを埋め込む
+                'add_metadata': True  # メタデータを追加
             })
         
         elif download_type in ['video', 'both']:
@@ -306,7 +316,7 @@ if __name__ == "__main__":
             break
         
         # ダウンロード種類の選択
-        print("\n1. 音声のみダウンロード（最高品質m4a）")
+        print("\n1. 音声のみダウンロード（最高品質opus）")
         print("2. 動画のみダウンロード")
         print("3. 両方ダウンロード")
         choice = input("選択してください (1/2/3): ")
