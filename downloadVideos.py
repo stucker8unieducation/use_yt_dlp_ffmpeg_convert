@@ -216,20 +216,24 @@ def download_video(url, output_path='downloads', download_type='both', video_for
     
     # yt-dlpの基本設定
     ydl_opts = {
-        'outtmpl': f'{output_path}/%(title)s.%(ext)s',  # タイトルをファイル名として使用
+        'outtmpl': f'{output_path}/%(title)s.%(ext)s',
         'prefer_ffmpeg': True,
         'ffmpeg_location': ffmpeg_path,
-        'restrictfilenames': False,  # ファイル名の制限を解除
+        'restrictfilenames': False,
         'verbose': True,
         'postprocessor_args': [
             '-loglevel', 'debug',
             '-stats',
         ],
+        'extractor_args': {
+            'generic': ['impersonate=chrome']
+        }
+        # ← http_headersは絶対に追加しない
     }
     
     try:
         # 動画情報の取得
-        with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             
         if download_type == 'audio':
