@@ -44,3 +44,8 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+
+# Virtual environment scripts and binaries
+./Scripts
+./include
+./share
